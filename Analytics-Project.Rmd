@@ -1,0 +1,192 @@
+---
+output:
+  pdf_document: default
+  html_document: default
+---
+```{r}
+library(tidyverse)
+library(Hmisc)
+library(data.table)
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(corrplot)
+library(GGally)
+library(tidyr)
+library(car)
+library(olsrr)
+library(MASS)
+library(brant)
+library(ordinal)
+library(nnet)
+library(reshape2)
+```
+
+
+Load the wvs dataset, convert -1-.- Don´t know -2-.- No answer -4-.- Not asked -5-.- Missing; Not available 
+to NA and then count the number of NAs
+```{r}
+wvs_raw <- read_excel("C:/Users/Ryan/Academics/Stat 218/wvs.xlsx")
+
+wvs_raw[wvs_raw == -1 | wvs_raw == -2 | wvs_raw == -4 | wvs_raw == -5] <- NA
+```
+
+Check Spearman's Correlation of predictor variables to response
+```{r}
+
+vars <- c("Q207", "Q287", "Q288R")
+
+wvs_vars <- wvs_raw[ , vars]
+
+cor_results <- sapply(vars[-1], function(var) {
+  cor(wvs_vars$Q207, wvs_vars[[var]], use = "pairwise.complete.obs", method = "spearman")
+})
+
+cor_sorted <- sort(cor_results, decreasing = TRUE)
+
+print(round(cor_sorted, 3))
+
+cor_df <- data.frame(
+  Predictors = names(cor_sorted),
+  Correlation = as.numeric(cor_sorted)
+)
+
+ggplot(cor_df, aes(x = reorder(Predictors, Correlation), y = Correlation)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  geom_text(aes(label = round(Correlation, 2)), hjust = -0.001) +
+  labs(title = "Spearman Correlation with Q207",
+       x = "Predictor Variables")
+```
+
+
+Convert to proper ordinal factor data types:
+```{r}
+
+wvs <- wvs_raw[, c("Q207", "Q287", "Q288R")]
+
+sum(is.na(wvs[c("Q207", "Q287", "Q288R")]))
+
+wvs <- na.omit(wvs[c("Q207", "Q287", "Q288R")])
+
+# Q207 - Social media information source: Ordinal variable
+wvs$Q207 <- factor(wvs$Q207, 
+                   levels = c(5, 4, 3, 2, 1), 
+                   ordered = TRUE)
+
+
+# Q287 - Social class: Factor with ordered levels
+wvs$Q287 <- factor(wvs$Q287, 
+                   levels = c(5, 4, 3, 2, 1), 
+                   ordered = TRUE)
+
+# Q288R - Income level: Factor with ordered levels
+wvs$Q288R <- factor(wvs$Q288R, 
+                   levels = c(1, 2, 3), 
+                    ordered = TRUE)
+
+str(wvs)
+```
+
+
+# Additional EDA for the Distribution of Age and the Bar plot for Frequency of Social Media Use
+```{r}
+ggplot(wvs, aes(x = Q207)) + 
+  geom_bar(fill = "skyblue") + 
+  labs(title = "Frequency of Social Media Use", x = "Usage Level", y = "Count")
+```
+
+
+Perform Ordinal Logistic Regression
+```{r}
+model <- polr(Q207 ~ Q287 + Q288R, data = wvs, method = "logistic")
+summary(model)
+```
+
+
+Test if all the variables hold the Proportional Odds Assumption
+```{r}
+brant_test <- brant(model)
+summary(brant_test)
+```
+
+
+```{r}
+sf <- function(y) {
+  eps <- 1e-6  # small constant to avoid 0 or 1
+  p <- function(k) mean(y >= k)
+  qlogis_safe <- function(p) qlogis(pmax(eps, pmin(1 - eps, p)))
+  
+  c('Y>=1' = qlogis_safe(p(1)),
+    'Y>=2' = qlogis_safe(p(2)),
+    'Y>=3' = qlogis_safe(p(3)),
+    'Y>=4' = qlogis_safe(p(4)),
+    'Y>=5' = qlogis_safe(p(5)))
+}
+
+```
+
+
+```{r}
+s <- with(wvs, summary(as.numeric(Q207) ~ Q287 + Q288R, fun=sf))
+s
+```
+
+
+```{r}
+# Logistic regression for Q207 >= 2
+model1 <- glm(I(as.numeric(Q207) >= 2) ~ Q287 + Q288R, 
+              family = "binomial", data = wvs)
+
+# Logistic regression for Q207 >= 3
+model2 <- glm(I(as.numeric(Q207) >= 3) ~ Q287 + Q288R, 
+              family = "binomial", data = wvs)
+
+# View model summaries
+summary(model1)
+summary(model2)
+
+```
+
+For predicted probabilities:
+```{r}
+# Create all combinations of Q287 and Q288R
+newdat <- expand.grid(
+  Q287 = factor(1:5, levels = 1:5, ordered = TRUE),
+  Q288R = factor(1:3, levels = 1:3, ordered = TRUE)
+)
+
+# Add predicted probabilities
+newdat <- cbind(newdat, predict(model, newdat, type = "probs"))
+
+# View first few rows
+View(newdat)
+```
+
+```{r}
+
+# Rename the levels to be interpretable
+colnames(newdat)[3:7] <- c("Daily", "Weekly", "Monthly", "LessMonthly", "Never")
+
+# Convert wide to long format
+longdat <- melt(newdat, id.vars = c("Q287", "Q288R"),
+                variable.name = "Level", value.name = "Probability")
+
+# View
+View(longdat)
+
+```
+
+
+```{r}
+ggplot(longdat, aes(x = Q287, y = Probability, fill = Level)) +
+  geom_bar(stat = "identity", position = "stack") +
+  facet_wrap(~ Q288R, labeller = label_both) +
+  labs(title = "Predicted Probabilities of Social Media Use",
+       x = "Subjective Social Class",
+       y = "Probability") +
+  theme_minimal()
+
+```
+
+
