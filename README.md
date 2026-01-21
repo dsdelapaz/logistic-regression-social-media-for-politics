@@ -63,10 +63,6 @@ The analytical pipeline combines exploratory and inferential techniques:
 2. **Ordinal Logistic Regression**
    - Cumulative logit model estimated using `polr()` from the `MASS` package:
      
-     \[
-     \log\left(\frac{P(Y \ge j)}{P(Y < j)}\right) = \theta_j - (\beta_1 \text{Social Class} + \beta_2 \text{Income}), \quad j = 2,\dots,5
-     \]
-
 3. **Model Diagnostics**
    - Brant test to formally assess the proportional odds assumption
    - Stratified cumulative log-odds summaries
